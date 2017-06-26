@@ -4,6 +4,8 @@ AWS Network ACL Fail2ban Script
 This script is used as a standalone script to block and unblock IPs on Amazon EC2 network ACLs or can be used with Fail2Ban. Since only 20 inbound rules are allowed with AWS if an IPtables 'jail' is provided the IP will be blocked on the host iptables 
 if necessary
 
+This script uses a local sqlite database that will be created in the same directory as this script is run or one can be specified with the -d flag.
+
 <pre>
 usage: aws_nacl.py [-h] [-a ACL] [-i IP] [-j JAIL] [-d DB] [-b] [-u] [-g] [-v]
 
