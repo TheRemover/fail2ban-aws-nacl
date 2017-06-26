@@ -23,6 +23,8 @@ optional arguments:
   -v, --verbose         Verbose logging
   </pre>
   
-  If used with Fail2Ban, aws.conf needs to be copied to the Fail2Ban action.d folder and jail.local needs to be copeid to the Fail2ban folder to set the default ban action.
+  If used with Fail2Ban, aws.conf needs to be copied to the Fail2Ban action.d folder and jail.local needs to be copeid to the Fail2ban folder to set the default ban action. The location of the aws_nacl.py script will need to be specified for your use case in aws.conf.
+  
+  AWS User ID and Pass for awscli will need to be configured prior to first run. 
   
   
