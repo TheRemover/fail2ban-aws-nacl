@@ -89,7 +89,7 @@ def sqlite_connect(file_name):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         conn = sqlite3.connect("{}/{}".format(dir_path, file_name))
         cursor = conn.cursor()
-        cursor.execute(table)
+        cursor.execute(make_table)
         conn.commit()
     else:
         try:
