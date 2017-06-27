@@ -17,11 +17,11 @@ import subprocess
 
 #Constants
 #AWS only allows 20 inbound subtract default ACL rules from 20 for max
-MAX_BLOCKS = 0
+MAX_BLOCKS = 10
 #Set range for rules
 RULE_RANGE = 100
 #Set rule start, by default AWS ACL starts rules at 100
-RULE_BASE = 50
+RULE_BASE = 1
 
 def print_acl(acl):
     """This function prints the ACL given an ec2 object and ACL id"""
