@@ -14,7 +14,6 @@ import logging.handlers
 import requests
 import boto3
 import subprocess
-from tabulate import tabulate
 
 #Constants
 #AWS only allows 20 inbound subtract default ACL rules from 20 for max
@@ -28,39 +27,20 @@ def check_block(ip,acl):
    acl = get_acl(acl)
    list = acl['NetworkAcls'][0]['Entries']
    for entry in list:
-      if ip in entry["CidrBlock"]:
+      if ip in entry['CidrBlock']:
          return True
    return False
 
 
-def get_acl(acl_id):
-    """This function gets the ACL given an ec2 object and ACL id"""
+def get_acl(acl):
+    """This function prints the ACL given an ec2 object and ACL id"""
     ec2 = boto3.client('ec2')
     acl_response = ec2.describe_network_acls(
         NetworkAclIds=[
-            acl_id,
+            acl,
         ],
     )
     return acl_response
-
-def print_inbound_acl(acl_id):
-   blocks = []
-   table = {num:name[8:] for name,num in vars(socket).items() if name.startswith("IPPROTO")}
-   acl = get_acl(acl_id)
-   list = acl['NetworkAcls'][0]['Entries']
-   for entry in list:
-     if not entry["Egress"]:
-	 if "PortRange" in entry:
-		ports = ({"To":entry["PortRange"]["To"], "From":entry["PortRange"]["From"]})
-         else:
-	 	ports = ({"To":"", "From":""})
-	 if entry['Protocol'] == "-1":
-		proto = "all"
-	 else:
-		proto = table[int (entry['Protocol'])]
-	 blocks.append([entry['RuleNumber'],proto,entry['CidrBlock'],ports["To"],ports["From"],entry['RuleAction']])
-   print "Inbound Network ACL"
-   print tabulate(blocks,headers=["Rule","Protocol","CIDR","Port From","Port To","Action"])
 
 def is_acl(acl):
     ec2 = boto3.client('ec2')
@@ -139,8 +119,8 @@ def main():
     parser.add_argument('-a', '--acl', help='ACL ID')
     parser.add_argument('-j', '--jail', help='Fail2Ban Jail')
     parser.add_argument('-d', '--db', default='aws-nacl.db', help='Database')
-    parser.add_argument('-b', '--block', metavar="IP", help='Block IP address')
-    parser.add_argument('-u', '--unblock', metavar="IP", help='Unblock IP address')
+    parser.add_argument('-b', '--block', help='Block IP address')
+    parser.add_argument('-u', '--unblock', help='Unblock IP address')
     parser.add_argument('-g', '--get', action='store_true', help='Get ACL')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose logging')
     args = parser.parse_args()
@@ -171,9 +151,8 @@ def main():
 
     if args.get or (not args.block and not args.unblock):
         my_logger.info('Printing ACL')
-	#pretty_printer.pprint(get_acl(acl)['NetworkAcls'][0]['Entries'])
-        print_inbound_acl(acl)
-	exit(0)
+	pretty_printer.pprint(get_acl(acl)['NetworkAcls'][0]['Entries'])
+        exit(0)
 
 
     my_logger.info('Configuring DB')
@@ -216,11 +195,6 @@ def main():
                 RuleAction='deny',
                 RuleNumber=rule_num
             )
-	    if not check_block(args.block, acl):
-	       my_logger.error('Failed to block IP {} in AWS ACL'.format(args.block))
-	       cursor.execute('''UPDATE blocks SET blocked = 0 where ip=? and
-                              blocked=1''', (args.block,))
-               conn.commit()
         else:
             my_logger.debug('Max blocks on AWS Network ACL, checking for IPTables') 
             if  args.jail:
