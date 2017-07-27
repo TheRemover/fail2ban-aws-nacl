@@ -7,14 +7,13 @@ if necessary
 This script uses a local sqlite database that will be created in the same directory as this script is run or one can be specified with the -d flag.
 
 <pre>
-usage: aws_nacl.py [-h] [-a ACL] [-i IP] [-j JAIL] [-d DB] [-b] [-u] [-g] [-v]
+usage: aws_nacl.py [-h] [-a ACL] [-j JAIL] [-d DB] [-b IP] [-u IP] [-g] [-v]
 
 Script to block IPs on AWS EC2 Network ACL
 
 optional arguments:
   -h, --help            show this help message and exit
   -a ACL, --acl ACL     ACL ID
-  -i IP, --ip IP        IP address
   -j JAIL, --jail JAIL  Fail2Ban Jail
   -d DB, --db DB        Database
   -b, --block           Block IP address

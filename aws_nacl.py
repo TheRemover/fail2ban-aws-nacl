@@ -14,6 +14,7 @@ import logging.handlers
 import requests
 import boto3
 import subprocess
+from tabulate import tabulate
 
 #Constants
 #AWS only allows 20 inbound subtract default ACL rules from 20 for max
@@ -23,16 +24,43 @@ RULE_RANGE = 100
 #Set rule start, by default AWS ACL starts rules at 100
 RULE_BASE = 1
 
-def print_acl(acl):
-    """This function prints the ACL given an ec2 object and ACL id"""
+def check_block(ip,acl):
+   acl = get_acl(acl)
+   list = acl['NetworkAcls'][0]['Entries']
+   for entry in list:
+      if ip in entry["CidrBlock"]:
+         return True
+   return False
+
+
+def get_acl(acl_id):
+    """This function gets the ACL given an ec2 object and ACL id"""
     ec2 = boto3.client('ec2')
     acl_response = ec2.describe_network_acls(
         NetworkAclIds=[
-            acl,
+            acl_id,
         ],
     )
-    pretty_printer = pprint.PrettyPrinter(indent=4)
-    pretty_printer.pprint(acl_response['NetworkAcls'][0]['Entries'])
+    return acl_response
+
+def print_inbound_acl(acl_id):
+   blocks = []
+   table = {num:name[8:] for name,num in vars(socket).items() if name.startswith("IPPROTO")}
+   acl = get_acl(acl_id)
+   list = acl['NetworkAcls'][0]['Entries']
+   for entry in list:
+     if not entry["Egress"]:
+	 if "PortRange" in entry:
+		ports = ({"To":entry["PortRange"]["To"], "From":entry["PortRange"]["From"]})
+         else:
+	 	ports = ({"To":"", "From":""})
+	 if entry['Protocol'] == "-1":
+		proto = "all"
+	 else:
+		proto = table[int (entry['Protocol'])]
+	 blocks.append([entry['RuleNumber'],proto,entry['CidrBlock'],ports["To"],ports["From"],entry['RuleAction']])
+   print "Inbound Network ACL"
+   print tabulate(blocks,headers=["Rule","Protocol","CIDR","Port From","Port To","Action"])
 
 def is_acl(acl):
     ec2 = boto3.client('ec2')
@@ -46,7 +74,7 @@ def is_acl(acl):
     except Exception:
         return False
 
-def get_acl():
+def get_acl_id():
     ec2 = boto3.client('ec2')
     meta = "http://169.254.169.254/latest/meta-data/network/interfaces/macs/"
     mac = requests.get(meta).text
@@ -109,22 +137,22 @@ def main():
     my_logger.info('Checking arguments')
     parser = argparse.ArgumentParser(description="Script to block IPs on AWS EC2 Network ACL")
     parser.add_argument('-a', '--acl', help='ACL ID')
-    parser.add_argument('-i', '--ip', help='IP address')
     parser.add_argument('-j', '--jail', help='Fail2Ban Jail')
     parser.add_argument('-d', '--db', default='aws-nacl.db', help='Database')
-    parser.add_argument('-b', '--block', action='store_true', help='Block IP address')
-    parser.add_argument('-u', '--unblock', action='store_true', help='Unblock IP address')
+    parser.add_argument('-b', '--block', metavar="IP", help='Block IP address')
+    parser.add_argument('-u', '--unblock', metavar="IP", help='Unblock IP address')
     parser.add_argument('-g', '--get', action='store_true', help='Get ACL')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose logging')
     args = parser.parse_args()
 
     ec2_resource = boto3.resource('ec2')
+    pretty_printer = pprint.PrettyPrinter(indent=4)
 
     if args.verbose:
         my_logger.info('Setting logging to debug')
         my_logger.setLevel(logging.DEBUG)
 
-    if (args.block and args.unblock) or (not args.ip and (args.unblock or args.block)):
+    if (args.block and args.unblock):
         my_logger.error('Invalid arguments')
         parser.print_usage()
         exit(1)
@@ -137,14 +165,15 @@ def main():
             exit(1)
     else:
         my_logger.info('Searching for current ACL ID')
-        acl = get_acl()
+        acl = get_acl_id()
         network_acl = ec2_resource.NetworkAcl(acl)
         my_logger.debug('Network ACL ID: {}'.format(network_acl))
 
     if args.get or (not args.block and not args.unblock):
         my_logger.info('Printing ACL')
-        print_acl(acl)
-        exit(0)
+	#pretty_printer.pprint(get_acl(acl)['NetworkAcls'][0]['Entries'])
+        print_inbound_acl(acl)
+	exit(0)
 
 
     my_logger.info('Configuring DB')
@@ -153,13 +182,13 @@ def main():
 
     if args.block:
         my_logger.info('Checking if valid IP')
-        if not validate_ip(args.ip):
+        if not validate_ip(args.block):
             print "IP {} is invalid".format(args.ip)
             exit(1)
-        my_logger.info('Searching DB for IP: {}'.format(args.ip))
-        cursor.execute('''select count (*) from blocks where ip=? and blocked=1''', (args.ip,))
+        my_logger.info('Searching DB for IP: {}'.format(args.block))
+        cursor.execute('''select count (*) from blocks where ip=? and blocked=1''', (args.block,))
         if cursor.fetchone()[0] > 0:
-            print "IP {} already blocked".format(args.ip)
+            print "IP {} already blocked".format(args.block)
             exit(0)
         my_logger.info('Checking AWS block count')
         cursor.execute('''select count (*) from blocks where blocked=1 and host =0''')
@@ -169,14 +198,14 @@ def main():
             my_logger.debug('Current blocks less then Max: {}'.format(MAX_BLOCKS))
             my_logger.info('Adding block to the DB')
             cursor.execute('''insert into blocks (ip, acl, blocked,host)
-                               values (?,?,?,?)''', (args.ip, acl, 1, 0))
+                               values (?,?,?,?)''', (args.block, acl, 1, 0))
             conn.commit()
             my_logger.info('Caculating Rule number based on DB ID')
             cursor.execute('''select seq from sqlite_sequence where name="blocks"''')
             rule_num = cursor.fetchone()[0] % RULE_RANGE + RULE_BASE
             my_logger.info('Adding Network ACL')
             network_acl.create_entry(
-                CidrBlock=args.ip+'/32',
+                CidrBlock=args.block+'/32',
                 DryRun=False,
                 Egress=False,
                 PortRange={
@@ -187,25 +216,30 @@ def main():
                 RuleAction='deny',
                 RuleNumber=rule_num
             )
+	    if not check_block(args.block, acl):
+	       my_logger.error('Failed to block IP {} in AWS ACL'.format(args.block))
+	       cursor.execute('''UPDATE blocks SET blocked = 0 where ip=? and
+                              blocked=1''', (args.block,))
+               conn.commit()
         else:
             my_logger.debug('Max blocks on AWS Network ACL, checking for IPTables') 
             if  args.jail:
-                my_logger.info('Blocking IP {} in f2b-{}'.format(args.ip,args.jail))
-                iptables = "/sbin/iptables -w -I {} 1 -s {} -j REJECT".format(args.jail, args.ip)
+                my_logger.info('Blocking IP {} in f2b-{}'.format(args.block,args.jail))
+                iptables = "/sbin/iptables -w -I {} 1 -s {} -j REJECT".format(args.jail, args.block)
                 print iptables
                 subprocess.call(iptables, shell=True)
                 cursor.execute('''insert into blocks (ip, acl, blocked,host)
-                                  values (?,?,?,?)''', (args.ip, '', 1, 1))
+                                  values (?,?,?,?)''', (args.block, '', 1, 1))
                 conn.commit()
             else:
                 my_logger.error('No IPtables Chain set, IP will not be blocked')
     if args.unblock:
         my_logger.info('Checking if valid IP')
-        if not validate_ip(args.ip):
-            my_logger.error("IP {} is invalid".format(args.ip))
+        if not validate_ip(args.unblock):
+            my_logger.error("IP {} is invalid".format(args.unblock))
             exit(1)
         my_logger.info('Checking for IP in the DB')
-        test = 'select id, host from blocks where ip="{}" and blocked=1'.format(args.ip)
+        test = 'select id, host from blocks where ip="{}" and blocked=1'.format(args.unblock)
         cursor.execute(test)
         results = cursor.fetchone()
         if results is not None:
@@ -221,17 +255,17 @@ def main():
                 )
                 my_logger.info('Updating DB')
                 cursor.execute('''UPDATE blocks SET blocked = 0 where ip=? and
-                                   blocked=1''', (args.ip,))
+                                   blocked=1''', (args.unblock,))
                 conn.commit()
             else:
                 if args.jail:
-                    my_logger.info('Unblocking IP {} in f2b-{}'.format(args.ip,args.jail))
-                    iptables = 'iptables -w -D {} -s {} -j REJECT'.format(args.jail, args.ip)
+                    my_logger.info('Unblocking IP {} in f2b-{}'.format(args.unblock,args.jail))
+                    iptables = 'iptables -w -D {} -s {} -j REJECT'.format(args.jail, args.unblock)
                     subprocess.call(iptables, shell=True)
-                    cursor.execute('''UPDATE blocks SET blocked = 0 where ip=? and blocked=1''', (args.ip,))
+                    cursor.execute('''UPDATE blocks SET blocked = 0 where ip=? and blocked=1''', (args.unblock,))
                     conn.commit()
         else:
-            my_logger.error("IP {} not in blocks database".format(args.ip))
+            my_logger.error("IP {} not in blocks database".format(args.unblock))
             exit(1)
 
 
